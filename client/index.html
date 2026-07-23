@@ -189,6 +189,15 @@
 const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
 const wsBase = wsProto + '://' + location.host;
 
+// Lien direct : ?mode=viewer ouvre directement le mode spectateur,
+// ?mode=cam ouvre directement le mode caméra (pratique à partager).
+window.addEventListener('DOMContentLoaded', () => {
+  const params = new URLSearchParams(location.search);
+  const mode = params.get('mode');
+  if(mode === 'viewer') startViewer();
+  else if(mode === 'cam') startBroadcaster();
+});
+
 function setConn(label, live){
   document.getElementById('connLabel').textContent = label;
   document.getElementById('connDot').className = 'dot' + (live ? ' live' : '');
