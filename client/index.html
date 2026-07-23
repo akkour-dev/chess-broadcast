@@ -139,6 +139,9 @@
         étant du côté le plus proche de la caméra.
       </div>
       <div class="btn-row">
+        <button class="btn" onclick="switchCamera()">↺ Retourner la caméra</button>
+      </div>
+      <div class="btn-row">
         <button class="btn" id="clearCornersBtn" onclick="clearCorners()">Effacer les points</button>
         <button class="btn primary" id="calibrateBtn" onclick="sendCalibration()" disabled>Valider la calibration</button>
       </div>
@@ -247,6 +250,29 @@ const initialFen = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR';
 
 /* ================= MODE CAMÉRA ================= */
 let bcSocket, video, overlay, octx, corners = [], streaming=false, streamTimer=null;
+let currentFacing = 'environment';
+let currentStream = null;
+let videoDevices = [];
+let currentDeviceIndex = -1;
+
+function stopCurrentStream(){
+  if(currentStream){
+    currentStream.getTracks().forEach(t => t.stop());
+    currentStream = null;
+  }
+}
+
+function openCamera(constraints){
+  return navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+    stopCurrentStream();
+    currentStream = stream;
+    video.srcObject = stream;
+    video.onloadedmetadata = () => {
+      overlay.width = video.clientWidth; overlay.height = video.clientHeight;
+    };
+    clearCorners();
+  });
+}
 
 function startBroadcaster(){
   document.getElementById('modeChoice').style.display='none';
@@ -258,14 +284,33 @@ function startBroadcaster(){
   overlay = document.getElementById('overlay');
   octx = overlay.getContext('2d');
 
-  navigator.mediaDevices.getUserMedia({video:{width:1280,height:720, facingMode:{ideal : 'environment' }})
-    .then(stream => {
-      video.srcObject = stream;
-      video.onloadedmetadata = () => {
-        overlay.width = video.clientWidth; overlay.height = video.clientHeight;
-      };
+  openCamera({video:{width:1280,height:720, facingMode:{ideal:currentFacing}}})
+    .then(() => navigator.mediaDevices.enumerateDevices())
+    .then(devices => {
+      videoDevices = devices.filter(d => d.kind === 'videoinput');
     })
     .catch(err => log('camLog', 'Erreur caméra : ' + err.message, 'warn'));
+}
+
+function switchCamera(){
+  // 1ère méthode : bascule avant/arrière via facingMode (marche sur la plupart des téléphones)
+  currentFacing = (currentFacing === 'environment') ? 'user' : 'environment';
+  openCamera({video:{width:1280,height:720, facingMode:{exact:currentFacing}}})
+    .then(() => log('camLog', 'Caméra basculée (' + (currentFacing==='environment'?'arrière':'avant') + ').', ''))
+    .catch(() => {
+      // 2e méthode (secours) : certains appareils/navigateurs n'exposent pas
+      // facingMode correctement -> on bascule manuellement entre les caméras détectées
+      if(videoDevices.length < 2){
+        log('camLog', "Impossible de trouver une autre caméra sur cet appareil.", 'warn');
+        return;
+      }
+      currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
+      const deviceId = videoDevices[currentDeviceIndex].deviceId;
+      openCamera({video:{width:1280,height:720, deviceId:{exact:deviceId}}})
+        .then(() => log('camLog', 'Caméra basculée.', ''))
+        .catch(err => log('camLog', 'Erreur caméra : ' + err.message, 'warn'));
+    });
+}
 
   overlay.addEventListener('click', e => {
     if(corners.length>=4) return;
