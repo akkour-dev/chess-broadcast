@@ -36,9 +36,9 @@ GRID_SIZE = 400          # taille (px) de l'image redressée
 CELL = GRID_SIZE // 8     # taille d'une case redressée
 CROP_MARGIN = 10          # on ignore les bords de case (lignes du plateau)
 
-MOTION_THRESHOLD = 8.0    # frame->frame : en dessous = "rien ne bouge"
-STABLE_FRAMES = 4         # nb de frames stables avant de figer un état
-CHANGE_THRESHOLD = 18.0   # état->état : au dessus = "case modifiée"
+MOTION_THRESHOLD = 14.0   # frame->frame : en dessous = "rien ne bouge" (assoupli pour caméras de téléphone)
+STABLE_FRAMES = 3         # nb de frames stables avant de figer un état
+CHANGE_THRESHOLD = 20.0   # état->état : au dessus = "case modifiée"
 MATCH_TOLERANCE = 1       # nb de cases de différence tolérées avec le coup attendu
 
 
@@ -152,18 +152,18 @@ class BoardTracker:
         if self.pending_cells is None:
             self.pending_cells = cells
             self.stable_count = 1
-            return None
+            return {"status": "tracking", "motion": 0.0, "stable": 1, "needed": STABLE_FRAMES}
 
         frame_motion = max(self._cell_diff(cells[s], self.pending_cells[s]) for s in range(64))
         self.pending_cells = cells
 
         if frame_motion > MOTION_THRESHOLD:
             self.stable_count = 0
-            return {"status": "motion"}
+            return {"status": "tracking", "motion": round(frame_motion, 1), "stable": 0, "needed": STABLE_FRAMES}
 
         self.stable_count += 1
         if self.stable_count < STABLE_FRAMES:
-            return None
+            return {"status": "tracking", "motion": round(frame_motion, 1), "stable": self.stable_count, "needed": STABLE_FRAMES}
 
         # Image stable depuis assez longtemps : comparer à la référence
         diffs = {s: self._cell_diff(cells[s], self.confirmed_cells[s]) for s in range(64)}
@@ -171,7 +171,7 @@ class BoardTracker:
 
         self.stable_count = 0
         if not touched:
-            return None  # rien n'a changé depuis le dernier coup confirmé
+            return {"status": "tracking", "motion": round(frame_motion, 1), "stable": 0, "needed": STABLE_FRAMES}
 
         move = self._match_move(touched)
         self.confirmed_cells = cells  # on fige le nouvel état dans tous les cas
