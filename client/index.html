@@ -203,11 +203,43 @@ function setConn(label, live){
   document.getElementById('connDot').className = 'dot' + (live ? ' live' : '');
 }
 
-/* ---------------- rendu de l'échiquier (canvas + unicode) ---------------- */
-const PIECE_GLYPH = {
-  'P':'♙','N':'♘','B':'♗','R':'♖','Q':'♕','K':'♔',
-  'p':'♟','n':'♞','b':'♝','r':'♜','q':'♛','k':'♚'
-};
+/* ---------------- rendu de l'échiquier (pièces vectorielles maison) ---------------- */
+function pieceSvg(type, isWhite){
+  const fill = isWhite ? '#F4EEDD' : '#2A1F14';
+  const stroke = isWhite ? '#2A1F14' : '#F4EEDD';
+  const c = `fill="${fill}" stroke="${stroke}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"`;
+  const shapes = {
+    P: `<circle cx="50" cy="30" r="13" ${c}/>
+        <path d="M38 46 Q50 41 62 46 L70 78 Q50 87 30 78 Z" ${c}/>
+        <rect x="23" y="80" width="54" height="10" rx="3" ${c}/>`,
+    R: `<path d="M28 18 H37 V27 H45 V18 H55 V27 H63 V18 H72 V37 L64 45 V70 H36 V45 L28 37 Z" ${c}/>
+        <path d="M29 70 H71 L77 88 H23 Z" ${c}/>`,
+    N: `<path d="M63 16 C46 16 32 27 29 45 L20 49 L25 61 L33 56 C33 63 37 67 37 67 L28 88 H75 L71 60 C80 53 82 40 73 28 C69 20 67 16 63 16 Z" ${c}/>
+        <circle cx="59" cy="33" r="3.2" fill="${stroke}"/>`,
+    B: `<circle cx="50" cy="15" r="5.5" ${c}/>
+        <path d="M50 23 C65 33 69 53 60 70 Q50 78 40 70 C31 53 35 33 50 23 Z" ${c}/>
+        <line x1="41" y1="45" x2="59" y2="52" stroke="${stroke}" stroke-width="3"/>
+        <path d="M31 79 Q50 70 69 79 L74 88 H26 Z" ${c}/>`,
+    Q: `<circle cx="25" cy="21" r="6" ${c}/><circle cx="50" cy="13" r="6" ${c}/><circle cx="75" cy="21" r="6" ${c}/>
+        <path d="M25 24 L34 60 H66 L75 24 L58 41 L50 20 L42 41 Z" ${c}/>
+        <path d="M29 61 Q50 53 71 61 L77 88 H23 Z" ${c}/>`,
+    K: `<line x1="50" y1="6" x2="50" y2="23" stroke="${stroke}" stroke-width="4.5"/>
+        <line x1="41" y1="14" x2="59" y2="14" stroke="${stroke}" stroke-width="4.5"/>
+        <path d="M50 23 C65 31 69 51 60 68 Q50 76 40 68 C31 51 35 31 50 23 Z" ${c}/>
+        <path d="M29 79 Q50 69 71 79 L77 88 H23 Z" ${c}/>`,
+  };
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${shapes[type] || ''}</svg>`;
+}
+
+const pieceImageCache = {};
+function getPieceImage(ch){
+  if(pieceImageCache[ch]) return pieceImageCache[ch];
+  const isWhite = ch === ch.toUpperCase();
+  const img = new Image();
+  img.src = 'data:image/svg+xml;base64,' + btoa(pieceSvg(ch.toUpperCase(), isWhite));
+  pieceImageCache[ch] = img;
+  return img;
+}
 
 function drawBoard(canvas, fen){
   const ctx = canvas.getContext('2d');
@@ -224,10 +256,13 @@ function drawBoard(canvas, fen){
     let c=0;
     for(const ch of rows[r]){
       if(/\d/.test(ch)){ c += parseInt(ch); continue; }
-      ctx.fillStyle = (ch === ch.toUpperCase()) ? '#F4EEDD' : '#231A10';
-      ctx.font = (cell*0.72)+'px serif';
-      ctx.textAlign='center'; ctx.textBaseline='middle';
-      ctx.fillText(PIECE_GLYPH[ch], c*cell+cell/2, r*cell+cell/2+2);
+      const img = getPieceImage(ch);
+      const x = c*cell + cell*0.08, y = r*cell + cell*0.08, s = cell*0.84;
+      if(img.complete){
+        ctx.drawImage(img, x, y, s, s);
+      } else {
+        img.onload = () => ctx.drawImage(img, x, y, s, s);
+      }
       c++;
     }
   }
@@ -299,6 +334,19 @@ function startBroadcaster(){
       videoDevices = devices.filter(d => d.kind === 'videoinput');
     })
     .catch(err => log('camLog', 'Erreur caméra : ' + err.message, 'warn'));
+
+  overlay.addEventListener('click', e => {
+    if(corners.length>=4) return;
+    const rect = overlay.getBoundingClientRect();
+    corners.push([e.clientX-rect.left, e.clientY-rect.top]);
+    drawCorners();
+    document.getElementById('calibrateBtn').disabled = corners.length!==4;
+  });
+
+  bcSocket = new WebSocket(wsBase + '/ws/broadcast');
+  bcSocket.onopen = () => setConn('caméra connectée', true);
+  bcSocket.onclose = () => setConn('déconnecté', false);
+  bcSocket.onmessage = ev => handleBroadcastMessage(JSON.parse(ev.data));
 }
 
 function switchCamera(){
@@ -319,20 +367,6 @@ function switchCamera(){
         .then(() => log('camLog', 'Caméra basculée.', ''))
         .catch(err => log('camLog', 'Erreur caméra : ' + err.message, 'warn'));
     });
-}
-
-  overlay.addEventListener('click', e => {
-    if(corners.length>=4) return;
-    const rect = overlay.getBoundingClientRect();
-    corners.push([e.clientX-rect.left, e.clientY-rect.top]);
-    drawCorners();
-    document.getElementById('calibrateBtn').disabled = corners.length!==4;
-  });
-
-  bcSocket = new WebSocket(wsBase + '/ws/broadcast');
-  bcSocket.onopen = () => setConn('caméra connectée', true);
-  bcSocket.onclose = () => setConn('déconnecté', false);
-  bcSocket.onmessage = ev => handleBroadcastMessage(JSON.parse(ev.data));
 }
 
 function drawCorners(){
@@ -400,7 +434,10 @@ function resetGame(){
 }
 
 function handleBroadcastMessage(msg){
-  if(msg.status === 'move'){
+  if(msg.status === 'tracking'){
+    const bar = '▮'.repeat(msg.stable) + '▯'.repeat(Math.max(0, msg.needed - msg.stable));
+    log('camLog', `Suivi actif — mouvement: ${msg.motion} | stabilité: ${bar}`, '');
+  } else if(msg.status === 'move'){
     log('camLog', 'Coup joué : ' + msg.san, 'move');
     drawBoard(document.getElementById('boardCanvas'), msg.fen);
     document.getElementById('turnLabel').textContent = msg.turn === 'white' ? 'Blancs' : 'Noirs';
@@ -413,6 +450,8 @@ function handleBroadcastMessage(msg){
     log('camLog', 'Calibration confirmée par le serveur.', '');
   } else if(msg.status === 'baseline_set'){
     log('camLog', 'Position de référence enregistrée. Tu peux jouer !', '');
+  } else if(msg.status === 'no_calibration'){
+    log('camLog', 'Calibration manquante — clique les 4 coins puis "Valider la calibration".', 'warn');
   }
 }
 
